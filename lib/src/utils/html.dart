@@ -1,22 +1,26 @@
 import 'dart:async';
 import 'dart:convert';
 // ignore: avoid_web_libraries_in_flutter
-import 'dart:html' as html;
+import 'dart:js_interop';
+import 'dart:js_interop_unsafe';
+
+import 'package:web/web.dart' as web;
 
 import 'utils_impl.dart';
 
 /// Utils class
 class Utils implements UtilsImpl {
   Utils._();
+
   static final Utils _utils = Utils._();
+
   static Utils get instance => _utils;
 
   @override
-  Future<Map<String, dynamic>?> get(String path,
-      [bool? isCollection = false, List<List>? conditions]) async {
+  Future<Map<String, dynamic>?> get(String path, [bool? isCollection = false, List<List>? conditions]) async {
     // Fetch the documents for this collection
     if (isCollection != null && isCollection == true) {
-      var dataCol = html.window.localStorage.entries.singleWhere(
+      var dataCol = web.window.localStorage.entries.singleWhere(
         (e) => e.key == path,
         orElse: () => const MapEntry('', ''),
       );
@@ -52,8 +56,7 @@ class Utils implements UtilsImpl {
   Stream<Map<String, dynamic>> stream(String path, [List<List>? conditions]) {
     // ignore: close_sinks
     final storage = _storageCache[path] ??
-        _storageCache.putIfAbsent(
-            path, () => StreamController<Map<String, dynamic>>.broadcast());
+        _storageCache.putIfAbsent(path, () => StreamController<Map<String, dynamic>>.broadcast());
 
     _initStream(storage, path);
     return storage.stream;
@@ -74,9 +77,8 @@ class Utils implements UtilsImpl {
     }
   }
 
-  void _initStream(
-      StreamController<Map<String, dynamic>> storage, String path) {
-    var dataCol = html.window.localStorage.entries.singleWhere(
+  void _initStream(StreamController<Map<String, dynamic>> storage, String path) {
+    var dataCol = web.window.localStorage.entries.singleWhere(
       (e) => e.key == path,
       orElse: () => const MapEntry('', ''),
     );
@@ -97,7 +99,7 @@ class Utils implements UtilsImpl {
 
   Future<dynamic> _readFromStorage(String path) async {
     final key = path.replaceAll(RegExp(r'[^\/]+\/?$'), '');
-    final data = html.window.localStorage.entries.firstWhere(
+    final data = web.window.localStorage.entries.firstWhere(
       (i) => i.key == key,
       orElse: () => const MapEntry('', ''),
     );
@@ -118,7 +120,7 @@ class Utils implements UtilsImpl {
 
     final uri = Uri.parse(path);
     final id = uri.pathSegments.last;
-    var dataCol = html.window.localStorage.entries.singleWhere(
+    var dataCol = web.window.localStorage.entries.singleWhere(
       (e) => e.key == key,
       orElse: () => const MapEntry('', ''),
     );
@@ -127,13 +129,13 @@ class Utils implements UtilsImpl {
         final mapCol = json.decode(dataCol.value) as Map<String, dynamic>;
         mapCol[id] = data;
         dataCol = MapEntry(id, json.encode(mapCol));
-        html.window.localStorage.update(
+        web.window.localStorage.update(
           key,
           (value) => dataCol.value,
           ifAbsent: () => dataCol.value,
         );
       } else {
-        html.window.localStorage.update(
+        web.window.localStorage.update(
           key,
           (value) => json.encode({id: data}),
           ifAbsent: () => json.encode({id: data}),
@@ -141,8 +143,7 @@ class Utils implements UtilsImpl {
       }
       // ignore: close_sinks
       final storage = _storageCache[key] ??
-          _storageCache.putIfAbsent(
-              key, () => StreamController<Map<String, dynamic>>.broadcast());
+          _storageCache.putIfAbsent(key, () => StreamController<Map<String, dynamic>>.broadcast());
 
       storage.sink.add(data);
     } catch (error) {
@@ -153,14 +154,14 @@ class Utils implements UtilsImpl {
   Future<dynamic> _deleteFromStorage(String path) async {
     if (path.endsWith('/')) {
       // If path is a directory path
-      final dataCol = html.window.localStorage.entries.singleWhere(
+      final dataCol = web.window.localStorage.entries.singleWhere(
         (element) => element.key == path,
         orElse: () => const MapEntry('', ''),
       );
 
       try {
         if (dataCol.key != '') {
-          html.window.localStorage.remove(dataCol.key);
+          web.window.localStorage.delete(dataCol.key.toJS);
         }
       } catch (error) {
         rethrow;
@@ -170,7 +171,7 @@ class Utils implements UtilsImpl {
       final uri = Uri.parse(path);
       final key = path.replaceAll(RegExp(r'[^\/]+\/?$'), '');
       final id = uri.pathSegments.last;
-      var dataCol = html.window.localStorage.entries.singleWhere(
+      var dataCol = web.window.localStorage.entries.singleWhere(
         (e) => e.key == key,
         orElse: () => const MapEntry('', ''),
       );
@@ -179,7 +180,7 @@ class Utils implements UtilsImpl {
         if (dataCol.key != '') {
           final mapCol = json.decode(dataCol.value) as Map<String, dynamic>;
           mapCol.remove(id);
-          html.window.localStorage.update(
+          web.window.localStorage.update(
             key,
             (value) => json.encode(mapCol),
             ifAbsent: () => dataCol.value,
@@ -196,4 +197,47 @@ class Utils implements UtilsImpl {
 
   @override
   void setUseSupportDirectory(bool useSupportDir) {}
+}
+
+//
+extension on web.Storage {
+  void forEach(void f(String key, String value)) {
+    for (var i = 0; true; i++) {
+      final item = key(i);
+      if (item == null) return;
+
+      f(item, this[item]!);
+    }
+  }
+
+  Iterable<String> get keys {
+    final keys = <String>[];
+    forEach((k, v) => keys.add(k));
+    return keys;
+  }
+
+  Iterable<String> get values {
+    final values = <String>[];
+    forEach((k, v) => values.add(v));
+    return values;
+  }
+
+  Iterable<MapEntry<String, String>> get entries {
+    return keys.map((String key) => MapEntry<String, String>(key, this[key] as String));
+  }
+
+  String update(String key, String update(String value), {String Function()? ifAbsent}) {
+    if (this.containsKey(key)) {
+      return this[key] = update(this[key] as String);
+    }
+    if (ifAbsent != null) {
+      return this[key] = ifAbsent();
+    }
+    throw ArgumentError.value(key, "key", "Key not in map.");
+  }
+
+  // TODO(nweiz): update this when maps support lazy iteration
+  bool containsValue(Object? value) => values.any((e) => e == value);
+
+  bool containsKey(Object? key) => getItem(key as String) != null;
 }
